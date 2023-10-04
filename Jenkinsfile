@@ -1,41 +1,44 @@
 pipeline {
-  agent any
+  agent none
   stages {
     stage('build') {
+      agent {
+        docker {
+          image 'maven:3.6.3-jdk-11-slim'
+        }
+
+      }
       steps {
         echo 'building sysfoo app...'
         sh 'mvn compile'
       }
     }
 
-    stage('test') {
-      parallel {
-        stage('unit tests') {
-          steps {
-            echo 'running unit tests'
-            sh 'mvn clean test'
-          }
+    stage('unit tests') {
+      agent {
+        docker {
+          image 'maven:3.6.3-jdk-11-slim'
         }
 
-        stage('integration tests') {
-          steps {
-            echo 'mock stage'
-            sleep 5
-          }
-        }
-
-        stage('SCA') {
-          steps {
-            sleep 8
-          }
-        }
-
+      }
+      steps {
+        echo 'running unit tests'
+        sh 'mvn clean test'
       }
     }
 
     stage('package') {
       parallel {
         stage('package') {
+          agent {
+            docker {
+              image 'maven:3.6.3-jdk-11-slim'
+            }
+
+          }
+          when {
+            branch 'master'
+          }
           steps {
             echo 'generating .war file'
             sh 'mvn package -DskipTests'
@@ -43,18 +46,37 @@ pipeline {
           }
         }
 
-        stage('pkg2') {
+        stage('Docker B&P') {
+          agent any
+          when {
+            branch 'master'
+          }
           steps {
-            sleep 6
+            script {
+              docker.withRegistry('https://index.docker.io/v1/', 'dockerlogin') {
+                def dockerImage = docker.build("initcron/sysfoo:v${env.BUILD_ID}", "./")
+                dockerImage.push()
+                dockerImage.push("latest")
+                dockerImage.push("dev")
+              }
+            }
+
           }
         }
 
       }
     }
 
-  }
-  tools {
-    maven 'Maven 3.6.3'
+    stage('Deploy to Dev') {
+      agent any
+      when {
+            branch 'master'
+      }
+      steps {
+        sh 'docker-compose up -d '
+      }
+    }
+
   }
   post {
     always {
